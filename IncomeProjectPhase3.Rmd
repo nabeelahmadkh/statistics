@@ -1,0 +1,248 @@
+---
+title: "IncomeProject"
+output: html_notebook
+---
+
+```{r}
+library(class)
+library(MASS)
+
+```
+
+
+
+```{r}
+theUrl<-"http://archive.ics.uci.edu/ml/machine-learning-databases/adult/adult.data"
+
+adult.data<- read.table(file = theUrl, header = FALSE, sep = ",", 
+                    strip.white = TRUE, stringsAsFactors = TRUE,
+                    col.names=c("age","workclass","fnlwgt","education","educationnum","maritalstatus",                      "occupation","relationship","race","sex","capitalgain","capitalloss",                     "hoursperweek","nativecountry","income")
+                    )
+dim (adult.data)
+
+```
+
+```{r}
+levels(adult.data$workclass)<- c("misLevel","FedGov","LocGov","NeverWorked","Private","SelfEmpNotInc","SelfEmpInc","StateGov","NoPay")
+
+levels(adult.data$education)<- list(presch=c("Preschool"), primary=c("1st-4th","5th-6th"),upperprim=c("7th-8th"), highsch=c("9th","Assoc-acdm","Assoc-voc","10th"),secndrysch=c("11th","12th"), graduate=c("Bachelors","Some-college"),master=c("Masters"), phd=c("Doctorate"))
+
+levels(adult.data$maritalstatus)<- list(divorce=c("Divorced","Separated"),married=c("Married-AF-	spouse","Married-civ-spouse","Married-spouse-absent"),notmarried=c("Never-married"),widowed=c("Widowed"))
+
+levels(adult.data$occupation)<- list(misLevel=c("?"), clerical=c("Adm-clerical"), lowskillabr=c("Craft-repair","Handlers-cleaners","Machine-op-inspct","Other-service","Priv-house-	serv","Prof-specialty","Protective-serv"),highskillabr=c("Sales","Tech-support","Transport-moving","Armed-Forces"),agricultr=c("Farming-fishing"))
+
+levels(adult.data$relationship)<- list(husband=c("Husband"), wife=c("Wife"), outofamily=c("Not-in-family"),unmarried=c("Unmarried"), relative=c("Other-relative"), ownchild=c("Own-child"))
+
+levels(adult.data$nativecountry)<- list(misLevel=c("?","South"),SEAsia=c("Vietnam","Laos","Cambodia","Thailand"),Asia=c("China","India","HongKong","Iran","Philippines","Taiwan"),NorthAmerica=c("Canada","Cuba","Dominican-Republic","Guatemala","Haiti","Honduras","Jamaica","Mexico","Nicaragua","Puerto-Rico","El-Salvador","United-States"), SouthAmerica=c("Ecuador","Peru","Columbia","Trinadad&Tobago"),Europe=c("France","Germany","Greece","Holand-Netherlands","Italy","Hungary","Ireland","Poland","Portugal","Scotland","England","Yugoslavia"),PacificIslands=c("Japan","France"),Oceania=c("Outlying-US(Guam-USVI-etc)"))
+
+
+```
+
+
+```{r}
+# Missing data treatment
+#install.packages('missForest')
+ library(missForest)
+ imputdata<- missForest(adult.data) 
+# check imputed values
+ imputdata$ximp
+# assign imputed values to a data frame
+ adult.cmplt<- imputdata$ximp
+
+```
+
+
+```{r}
+ratio = sample(1:nrow(adult.cmplt), size = 0.25*nrow(adult.cmplt))
+test.data = adult.cmplt[ratio,] #Test dataset 25% of total
+train.data = adult.cmplt[-ratio,] #Train dataset 75% of total
+dim(train.data)
+dim(test.data)
+
+```
+
+
+```{r}
+# Fitting Logistic Model on Training data
+glm.fit<- glm(income~., family=binomial(link='logit'),data = train.data)
+summary(glm.fit)
+# Predicting  the Logistic model on Test data
+set.seed(1234) # for splitting the data Randomly into train and test data set 
+glm.pred<- predict(glm.fit, test.data, type = "response")
+hist(glm.pred, breaks=20)
+hist(glm.pred[test.data$income], col="red", breaks=20, add=TRUE)
+table(actual= test.data$income, predicted= glm.pred>0.5)
+# (5708+1281)/8149 = 85.8% accuracy in test data
+```
+
+
+```{r}
+# Lasso prediction without CV
+xTrain <- model.matrix(income~.,data=train.data)  # convert train.data into matrix to make columns for Categorical variables
+yTrain <- as.matrix(train.data$income)
+
+# Lasso Prediction for xTrain matrix
+library (glmnet)
+
+# Construction of Lambda Matrix
+grid =10^seq (10,-2, length =100)
+
+# Do a logistic regression by variable selection[Lasso]
+lasso.mod <- glmnet(xTrain,yTrain,alpha = 1, lambda=grid, family="binomial",standardize=TRUE)
+
+dim(coef(lasso.mod))
+summary(lasso.mod)
+plot(lasso.mod)
+```
+
+```{r}
+# Lasso with CV
+xTest <- model.matrix(income~.,data = test.data)
+yTest <-as.matrix (test.data$income)
+
+set.seed (1)
+
+cv.out=cv.glmnet (xTrain,yTrain,alpha=1,family="binomial",standardize=TRUE,type.measure = "class")
+
+plot(cv.out$glmnet.fit, xvar="lambda", label=TRUE)
+plot(cv.out)
+
+cv.out$lambda.min
+
+coef(cv.out,cv.out$lambda.min)
+
+#make prediction on testing dataset
+lasso.predict <- predict(cv.out, newx = xTest, s =cv.out$lambda.min,type = "class")
+cm = as.matrix(table(Actual = yTest, Predicted = lasso.predict))
+cm
+#(5668+ 1327)/8140 =85.93% accuracy 
+
+```
+
+```{r}
+# Performing PCA on the data set
+#install.packages("pls")
+library(pls)
+str(train.data)
+completedata <- data.matrix(adult.cmplt)
+myTrainData<-data.matrix(train.data)
+myTestData <- data.matrix(test.data)
+summary(myTrainData)
+
+
+myTrainData<-data.frame(myTrainData)
+myTestData <- data.frame(myTestData)
+completedata <- data.frame(completedata)
+pcr.fit.com=pcr(income~., data=completedata,scale =TRUE, validation ="CV", family ="binomial")
+summary(pcr.fit.com)
+pcr.fit.com$scores # to display the matrix of PC
+PCmat <- pcr.fit.com$scores[,1:8] # choosing 8 components in the PC Matrix and then transferring them to another matrix
+PCmatWithResponse <- PCmat
+PCmatWithResponse <- as.data.frame(PCmatWithResponse)
+#PCmatWithResponse <- cbind(PCmatWithResponse, completedata$income) # adding Response to the PCmatrix by the column name Response 
+PCmatWithResponse <- cbind(PCmatWithResponse, adult.cmplt[,15]) # adding Response to the PCmatrix by the column name Response 
+colnames(PCmatWithResponse)[9] <- "income" # changing column name to income
+
+
+pcr.fit=pcr(income~., data=myTrainData,scale =TRUE, validation ="CV")
+summary(pcr.fit)
+pcr.pred = predict(pcr.fit, myTestData, ncomp=8)
+mean((myTrainData[, "income"] - data.frame(pcr.pred))^2)
+
+
+# Taking log of the values 
+BinaryPrediction <- pcr.pred
+output <- rep(0,8140)
+newOutput <- rep(0,8140)
+
+e <- exp(1)
+for (i in 1:8140){
+  output[i] <- (1/(1 + e^(-BinaryPrediction[i])))
+}
+
+for (i in 1:8140){
+  newOutput[i] <- (e^(BinaryPrediction[i])/(1 + e^(BinaryPrediction[i])))
+}
+# Converting the values of the output to 0 and 1 to match to log 
+myTestData$income[myTestData$income == 1] = 0
+myTestData$income[myTestData$income == 2] = 1
+
+#cm = as.matrix(table(Actual = myTestData$income, Predicted = pcr.pred))
+#cm = table(actual= myTestData$income, predicted= output<0.5)
+cm = as.matrix(table(Actual = myTestData$income, Predicted = output>0.8))
+cm
+
+cmNew = as.matrix(table(Actual = myTestData$income, Predicted = output>0.8))  # calibrated the output which gave best result in test data
+cmNew
+# Accuracy (5546+1178)/8140 = 83.3% accuracy 
+```
+
+
+
+```{r}
+# Ran this after Lasso reducing the number of coefficients predicted as zero by Lasso 
+KnnxTrain<-xTrain[,c(-1,-5,-8,-14,-22)]
+#summary(KnnxTrain)
+model<-knn.cv(KnnxTrain, yTrain, k=3)
+model5<-knn.cv(KnnxTrain, yTrain, k=5)
+model7<-knn.cv(KnnxTrain, yTrain, k=7)
+table(model, yTrain)
+# Accuracy came out to be 75% (k=3 )
+# 18506/24421 (76% for k=5)
+# 76% for k = 7 
+#######################
+```
+
+
+```{r}
+
+KnnxTrain<-xTrain[,c(-1,-5,-8,-14,-22)]
+summary(KnnxTrain)
+
+
+# run in odd numbers
+for (i in 3:20){
+  model<- knn.cv(KnnxTrain, yTrain, k=i)
+ table(model, yTrain)
+}
+
+model<-knn.cv(KnnxTrain, yTrain, k=3)
+model5<-knn.cv(KnnxTrain, yTrain, k=5)
+model7<-knn.cv(KnnxTrain, yTrain, k=7)
+model9<-knn.cv(KnnxTrain, yTrain, k=9)
+model11<-knn.cv(KnnxTrain, yTrain, k=11)
+
+table(model, yTrain)
+
+plot(model)
+
+#75% accuracy 
+
+
+
+### Performing KNN with Principle Components 
+PCmatWithResponse
+ratio = sample(1:nrow(PCmatWithResponse), size = 0.25*nrow(PCmatWithResponse))
+test.data.knn = PCmatWithResponse[ratio,] #Test dataset 25% of total
+train.data.knn = PCmatWithResponse[-ratio,] #Train dataset 75% of total
+train.data.knn <- as.data.frame(train.data.knn)
+test.data.knn <- as.data.frame(test.data.knn)
+
+train.data.response <- train.data.knn[,9]
+train.data.response <- as.data.frame(train.data.response)
+train.data.knn <- train.data.knn[,-9]
+
+test.data.response <- test.data.knn[,9]
+test.data.response <- as.data.frame(test.data.response)
+test.data.knn <- test.data.knn[,-9]
+
+vec <- vector()
+# Finding Best k in KNN classification
+for (i in 3:10){
+  knnmodel<- knn(train.data.knn, test.data.knn, train.data.response$train.data.response, k=17)
+  table(knnmodel, test.data.response$test.data.response)
+}
+
+
+```
+
